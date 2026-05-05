@@ -14,41 +14,355 @@ PlasmaExtras.Representation {
     property int    gamesCount:   0
     property bool   loading:      false
     property string errorMessage: ""
-    property string lastUpdated:  ""
+    property var    lastUpdated:  null
+    property var    teamsList:    []
+    property date   now:          new Date()
+    property var    expandedGames: ({})
+    readonly property int scrollRightPadding: Kirigami.Units.gridUnit
     signal refreshRequested()
+    signal selectedTeamsChanged(string teamIds, string teamName)
 
     Layout.minimumWidth:    Kirigami.Units.gridUnit * 22
     Layout.minimumHeight:   Kirigami.Units.gridUnit * 20
     Layout.preferredWidth:  Kirigami.Units.gridUnit * 28
     Layout.preferredHeight: Kirigami.Units.gridUnit * 40
 
-    function dayGroupLabel(dateStr, fallback) {
-        var todayStr = Qt.formatDate(new Date(), "yyyy-MM-dd");
-        var tom = new Date();
-        tom.setDate(tom.getDate() + 1);
-        var tomorrowStr = Qt.formatDate(tom, "yyyy-MM-dd");
-        if (dateStr === todayStr)    return "Today";
-        if (dateStr === tomorrowStr) return "Tomorrow";
-        return fallback;
+    function isGameExpanded(gameId) {
+        return fullRoot.expandedGames[String(gameId)] === true;
     }
 
-    header: PlasmaExtras.PlasmoidHeading {
+    function setGameExpanded(gameId, expanded) {
+        var next = {};
+        for (var key in fullRoot.expandedGames) next[key] = fullRoot.expandedGames[key];
+        if (expanded) next[String(gameId)] = true;
+        else delete next[String(gameId)];
+        fullRoot.expandedGames = next;
+    }
+
+    function lineScore(linescores, index) {
+        if (!linescores || index >= linescores.length || linescores[index] === undefined)
+            return "–";
+        return linescores[index];
+    }
+
+    function lineScoreFromText(linescoreText, index) {
+        if (!linescoreText) return "–";
+        var values = String(linescoreText).split("|");
+        if (index >= values.length || values[index] === "") return "–";
+        return values[index];
+    }
+
+    function visitorLineScore(game, index) {
+        var value = -1;
+        if (index === 0) value = game.visitorQ1;
+        else if (index === 1) value = game.visitorQ2;
+        else if (index === 2) value = game.visitorQ3;
+        else if (index === 3) value = game.visitorQ4;
+        else if (index === 4) value = game.visitorOT1;
+        else if (index === 5) value = game.visitorOT2;
+        else if (index === 6) value = game.visitorOT3;
+        return value >= 0 ? value : "–";
+    }
+
+    function homeLineScore(game, index) {
+        var value = -1;
+        if (index === 0) value = game.homeQ1;
+        else if (index === 1) value = game.homeQ2;
+        else if (index === 2) value = game.homeQ3;
+        else if (index === 3) value = game.homeQ4;
+        else if (index === 4) value = game.homeOT1;
+        else if (index === 5) value = game.homeOT2;
+        else if (index === 6) value = game.homeOT3;
+        return value >= 0 ? value : "–";
+    }
+
+    function lineScoreCount(linescoreText, linescores) {
+        if (linescoreText) return String(linescoreText).split("|").length;
+        return (linescores || []).length;
+    }
+
+    function visitorLineScoreCount(game) {
+        if (game.visitorOT3 >= 0) return 7;
+        if (game.visitorOT2 >= 0) return 6;
+        if (game.visitorOT1 >= 0) return 5;
+        if (game.visitorQ4 >= 0) return 4;
+        return 0;
+    }
+
+    function homeLineScoreCount(game) {
+        if (game.homeOT3 >= 0) return 7;
+        if (game.homeOT2 >= 0) return 6;
+        if (game.homeOT1 >= 0) return 5;
+        if (game.homeQ4 >= 0) return 4;
+        return 0;
+    }
+
+    function escapeText(value) {
+        return String(value || "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    function htmlColor(colorValue) {
+        function hex(channel) {
+            return Math.round(channel * 255).toString(16).padStart(2, "0");
+        }
+        return "#" + hex(colorValue.r) + hex(colorValue.g) + hex(colorValue.b);
+    }
+
+    function teamMarkup(label, winner, statusType) {
+        var text = fullRoot.escapeText(label);
+        if (statusType === "final" && winner) {
+            return "<font color=\"" + fullRoot.htmlColor(Kirigami.Theme.positiveTextColor) + "\"><b>" + text + "</b></font>";
+        }
+        if (statusType === "live") return "<b>" + text + "</b>";
+        return text;
+    }
+
+    function prettySeries(series) {
+        return String(series || "").replace(/([0-9]+)-([0-9]+)/g, "$1–$2");
+    }
+
+    function gameStage(game) {
+        return String(game.gameNote || (game.postseason ? "Playoffs" : "Regular season"))
+            .replace(/ - /g, " · ");
+    }
+
+    function compactTeamMarkup(abbr, winner, statusType) {
+        var label = abbr;
+        return fullRoot.teamMarkup(label, winner, statusType);
+    }
+
+    function matchupMarkup(game) {
+        return fullRoot.compactTeamMarkup(game.visitorAbbr, game.visitorWinner, game.statusType) +
+               " <font color=\"" + fullRoot.htmlColor(Kirigami.Theme.disabledTextColor) + "\">@</font> " +
+               fullRoot.compactTeamMarkup(game.homeAbbr, game.homeWinner, game.statusType);
+    }
+
+    function expandedSeriesLabel(game) {
+        return fullRoot.prettySeries(game.seriesSummary);
+    }
+
+    function expandedVenueLabel(game) {
+        return game.venue || "";
+    }
+
+    function localGameTime(datetime) {
+        if (!datetime) return "TBD";
+        return Qt.formatTime(new Date(datetime), "h:mm AP");
+    }
+
+    function minutesSince(dateValue) {
+        if (!dateValue) return 0;
+        return Math.max(0, Math.floor((fullRoot.now - new Date(dateValue)) / 60000));
+    }
+
+    function lastUpdatedLabel() {
+        if (!fullRoot.lastUpdated) return "";
+        return "Updated " + Qt.formatTime(new Date(fullRoot.lastUpdated), "h:mm AP");
+    }
+
+    function countdownLabel(datetime) {
+        if (!datetime) return "";
+        var diff = Math.max(0, Math.floor((new Date(datetime) - fullRoot.now) / 60000));
+        var hours = Math.floor(diff / 60);
+        var minutes = diff % 60;
+        return String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0");
+    }
+
+    function gameDetailLabel(game) {
+        return fullRoot.expandedVenueLabel(game);
+    }
+
+    function selectedTeamIds() {
+        var ids = String(Plasmoid.configuration.selectedTeamIds || "");
+        if (!ids && Plasmoid.configuration.teamId > 0) ids = String(Plasmoid.configuration.teamId);
+        if (!ids) return [];
+        return ids.split(",").filter(function(id) { return id !== ""; });
+    }
+
+    function isTeamSelected(teamId) {
+        var ids = fullRoot.selectedTeamIds();
+        for (var i = 0; i < ids.length; i++) {
+            if (parseInt(ids[i]) === parseInt(teamId)) return true;
+        }
+        return false;
+    }
+
+    function teamAbbr(teamId) {
+        for (var i = 0; i < fullRoot.teamsList.length; i++) {
+            if (parseInt(fullRoot.teamsList[i].id) === parseInt(teamId))
+                return fullRoot.teamsList[i].abbreviation || fullRoot.teamsList[i].displayName;
+        }
+        return "";
+    }
+
+    function teamConference(abbr) {
+        var east = ["ATL", "BOS", "BKN", "CHA", "CHI", "CLE", "DET", "IND", "MIA", "MIL", "NY", "NYK", "ORL", "PHI", "TOR", "WSH", "WAS"];
+        var value = String(abbr || "");
+        for (var i = 0; i < east.length; i++) {
+            if (east[i] === value) return "East";
+        }
+        return "West";
+    }
+
+    function teamIsConference(team, conference) {
+        return fullRoot.teamConference(team.abbreviation || team.displayName) === conference;
+    }
+
+    function labelForTeamIds(ids) {
+        if (ids.length === 0) return "All Teams";
+        var labels = [];
+        for (var i = 0; i < ids.length && i < 3; i++) {
+            labels.push(fullRoot.teamAbbr(ids[i]) || String(ids[i]));
+        }
+        if (ids.length > 3) labels.push("...");
+        return labels.join(", ");
+    }
+
+    function selectedTeamsLabel() {
+        return fullRoot.labelForTeamIds(fullRoot.selectedTeamIds());
+    }
+
+    function setTeamSelected(teamId, selected) {
+        var ids = fullRoot.selectedTeamIds();
+        var next = [];
+        var found = false;
+        for (var i = 0; i < ids.length; i++) {
+            if (parseInt(ids[i]) === parseInt(teamId)) {
+                found = true;
+                if (selected) next.push(String(ids[i]));
+            } else {
+                next.push(String(ids[i]));
+            }
+        }
+        if (selected && !found) next.push(String(teamId));
+        fullRoot.selectedTeamsChanged(next.join(","), fullRoot.labelForTeamIds(next));
+    }
+
+    function clearSelectedTeams() {
+        fullRoot.selectedTeamsChanged("", "All Teams");
+    }
+
+    function favoriteTeamIds() {
+        var ids = String(Plasmoid.configuration.favoriteTeamIds || "");
+        if (!ids) return [];
+        return ids.split(",").filter(function(id) { return id !== ""; });
+    }
+
+    function isFavoriteTeam(teamId) {
+        var ids = fullRoot.favoriteTeamIds();
+        for (var i = 0; i < ids.length; i++) {
+            if (parseInt(ids[i]) === parseInt(teamId)) return true;
+        }
+        return false;
+    }
+
+    function setFavoriteTeam(teamId, selected) {
+        var ids = fullRoot.favoriteTeamIds();
+        var next = [];
+        var found = false;
+        for (var i = 0; i < ids.length; i++) {
+            if (parseInt(ids[i]) === parseInt(teamId)) {
+                found = true;
+                if (selected) next.push(String(ids[i]));
+            } else {
+                next.push(String(ids[i]));
+            }
+        }
+        if (selected && !found) next.push(String(teamId));
+        Plasmoid.configuration.favoriteTeamIds = next.join(",");
+    }
+
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: fullRoot.now = new Date()
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: Kirigami.Theme.backgroundColor
+    }
+
+    Rectangle {
+        id: heading
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: headerContent.implicitHeight + Kirigami.Units.smallSpacing * 2
+        z: 20
+        opacity: 1
+        color: Kirigami.Theme.backgroundColor
+
+        Rectangle {
+            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            height: 1
+            color: Kirigami.Theme.textColor
+            opacity: 0.16
+        }
+
         RowLayout {
+            id: headerContent
             anchors.fill: parent
+            anchors.leftMargin: Kirigami.Units.largeSpacing * 1.5
+            anchors.rightMargin: Kirigami.Units.largeSpacing * 1.5
+            anchors.topMargin: Kirigami.Units.smallSpacing
+            anchors.bottomMargin: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.smallSpacing
 
-            PlasmaExtras.Heading {
+            Item {
+                id: teamMenuButton
                 Layout.fillWidth: true
-                level: 3
-                text: Plasmoid.configuration.teamName || "NBA Schedule"
-                elide: Text.ElideRight
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 1.6
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: teamButtonMouse.containsMouse
+                           ? Qt.rgba(Kirigami.Theme.highlightColor.r,
+                                     Kirigami.Theme.highlightColor.g,
+                                     Kirigami.Theme.highlightColor.b, 0.10)
+                           : "transparent"
+                    radius: 4
+                }
+
+                PlasmaComponents.Label {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        verticalCenter: parent.verticalCenter
+                        leftMargin: Kirigami.Units.smallSpacing
+                        rightMargin: Kirigami.Units.smallSpacing
+                    }
+                    text: fullRoot.selectedTeamsLabel() + " ▾"
+                    elide: Text.ElideRight
+                    horizontalAlignment: Text.AlignLeft
+                    font.bold: true
+                }
+
+                MouseArea {
+                    id: teamButtonMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: teamPopup.open()
+                }
             }
 
             PlasmaComponents.Label {
-                visible: fullRoot.lastUpdated !== ""
-                text: "Updated " + fullRoot.lastUpdated
-                opacity: 0.5
+                visible: fullRoot.lastUpdatedLabel() !== ""
+                text: fullRoot.lastUpdatedLabel()
+                opacity: 0.65
                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+            }
+
+            PlasmaComponents.ToolButton {
+                icon.name: "configure"
+                onClicked: settingsPopup.open()
+                PlasmaComponents.ToolTip.text: "Settings"
+                PlasmaComponents.ToolTip.visible: hovered
+                PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
             }
 
             PlasmaComponents.ToolButton {
@@ -60,10 +374,244 @@ PlasmaExtras.Representation {
                 PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
             }
         }
+
+        QQC2.Popup {
+            id: teamPopup
+            x: headerContent.x
+            y: heading.height
+            width: Math.min(fullRoot.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 18)
+            height: Math.min(Kirigami.Units.gridUnit * 22, teamsColumn.implicitHeight + Kirigami.Units.largeSpacing * 2)
+            padding: Kirigami.Units.smallSpacing
+            modal: false
+            focus: true
+            closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutside
+
+            background: Rectangle {
+                color: Kirigami.Theme.backgroundColor
+                border.color: Kirigami.Theme.disabledTextColor
+                border.width: 1
+                radius: 4
+            }
+
+            QQC2.ScrollView {
+                anchors.fill: parent
+                clip: true
+
+                Column {
+                    id: teamsColumn
+                    width: teamPopup.availableWidth
+                    spacing: 0
+
+                    QQC2.CheckBox {
+                        width: parent.width
+                        text: "All Teams"
+                        checked: fullRoot.selectedTeamIds().length === 0
+                        onToggled: if (checked) fullRoot.clearSelectedTeams()
+                    }
+
+                    PlasmaComponents.Label {
+                        width: parent.width
+                        text: "East"
+                        font.bold: true
+                        opacity: 0.7
+                    }
+
+                    Repeater {
+                        model: fullRoot.teamsList
+
+                        QQC2.CheckBox {
+                            width: teamsColumn.width
+                            visible: fullRoot.teamIsConference(modelData, "East")
+                            height: visible ? implicitHeight : 0
+                            text: modelData.abbreviation || modelData.displayName
+                            checked: fullRoot.isTeamSelected(modelData.id)
+                            onToggled: fullRoot.setTeamSelected(modelData.id, checked)
+                        }
+                    }
+
+                    PlasmaComponents.Label {
+                        width: parent.width
+                        text: "West"
+                        font.bold: true
+                        opacity: 0.7
+                    }
+
+                    Repeater {
+                        model: fullRoot.teamsList
+
+                        QQC2.CheckBox {
+                            width: teamsColumn.width
+                            visible: fullRoot.teamIsConference(modelData, "West")
+                            height: visible ? implicitHeight : 0
+                            text: modelData.abbreviation || modelData.displayName
+                            checked: fullRoot.isTeamSelected(modelData.id)
+                            onToggled: fullRoot.setTeamSelected(modelData.id, checked)
+                        }
+                    }
+                }
+            }
+        }
+
+        QQC2.Popup {
+            id: settingsPopup
+            x: Math.max(Kirigami.Units.smallSpacing, fullRoot.width - width - Kirigami.Units.largeSpacing)
+            y: heading.height
+            width: Math.min(fullRoot.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 24)
+            height: Math.min(
+                Math.max(Kirigami.Units.gridUnit * 6, fullRoot.height - heading.height - Kirigami.Units.largeSpacing),
+                settingsContent.implicitHeight + Kirigami.Units.largeSpacing * 2
+            )
+            padding: Kirigami.Units.smallSpacing
+            modal: false
+            focus: true
+            closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutside
+
+            background: Rectangle {
+                color: Kirigami.Theme.backgroundColor
+                border.color: Kirigami.Theme.disabledTextColor
+                border.width: 1
+                radius: 4
+            }
+
+            Flickable {
+                id: settingsFlick
+                anchors.fill: parent
+                clip: true
+                contentWidth: width
+                contentHeight: settingsContent.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+
+                QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AsNeeded }
+
+                ColumnLayout {
+                    id: settingsContent
+                    width: settingsFlick.width
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents.Label {
+                        text: "Favorite teams"
+                        font.bold: true
+                    }
+
+                    PlasmaComponents.Label {
+                        text: "East"
+                        font.bold: true
+                        opacity: 0.7
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Repeater {
+                            model: fullRoot.teamsList
+
+                            QQC2.CheckBox {
+                                visible: fullRoot.teamIsConference(modelData, "East")
+                                width: visible ? implicitWidth : 0
+                                height: visible ? implicitHeight : 0
+                                text: modelData.abbreviation || modelData.displayName
+                                checked: fullRoot.isFavoriteTeam(modelData.id)
+                                onToggled: fullRoot.setFavoriteTeam(modelData.id, checked)
+                            }
+                        }
+                    }
+
+                    PlasmaComponents.Label {
+                        text: "West"
+                        font.bold: true
+                        opacity: 0.7
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Kirigami.Units.smallSpacing
+
+                        Repeater {
+                            model: fullRoot.teamsList
+
+                            QQC2.CheckBox {
+                                visible: fullRoot.teamIsConference(modelData, "West")
+                                width: visible ? implicitWidth : 0
+                                height: visible ? implicitHeight : 0
+                                text: modelData.abbreviation || modelData.displayName
+                                checked: fullRoot.isFavoriteTeam(modelData.id)
+                                onToggled: fullRoot.setFavoriteTeam(modelData.id, checked)
+                            }
+                        }
+                    }
+
+                    Kirigami.Separator { Layout.fillWidth: true }
+
+                    PlasmaComponents.Label {
+                        text: "Completed games"
+                        font.bold: true
+                    }
+
+                    QQC2.ComboBox {
+                        id: completedGamesCombo
+                        Layout.fillWidth: true
+                        textRole: "label"
+                        model: [
+                            { label: "Last 1 day" },
+                            { label: "Last 3 days" },
+                            { label: "Last 7 days" }
+                        ]
+                        currentIndex: Plasmoid.configuration.daysBehind === 1 ? 0
+                                      : Plasmoid.configuration.daysBehind === 3 ? 1
+                                      : Plasmoid.configuration.daysBehind === 7 ? 2
+                                      : 0
+                        onActivated: function(index) {
+                            Plasmoid.configuration.dateFilterMode = "range";
+                            Plasmoid.configuration.daysBehind = [1, 3, 7][index];
+                        }
+                    }
+
+                    PlasmaComponents.Label {
+                        text: "Upcoming games"
+                        font.bold: true
+                    }
+
+                    QQC2.ComboBox {
+                        id: upcomingGamesCombo
+                        Layout.fillWidth: true
+                        textRole: "label"
+                        model: [
+                            { label: "Next 1 day" },
+                            { label: "Next 3 days" },
+                            { label: "Next 7 days" }
+                        ]
+                        currentIndex: Plasmoid.configuration.daysAhead === 1 ? 0
+                                      : Plasmoid.configuration.daysAhead === 3 ? 1
+                                      : Plasmoid.configuration.daysAhead === 7 ? 2
+                                      : 0
+                        onActivated: function(index) {
+                            Plasmoid.configuration.dateFilterMode = "range";
+                            Plasmoid.configuration.daysAhead = [1, 3, 7][index];
+                        }
+                    }
+
+                    PlasmaComponents.Label {
+                        Layout.fillWidth: true
+                        text: "Max: 14 days total (7 past + 7 future)"
+                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                        opacity: 0.7
+                    }
+                }
+            }
+        }
     }
 
     Item {
-        anchors.fill: parent
+        anchors {
+            fill: parent
+            topMargin: heading.height
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Kirigami.Theme.backgroundColor
+        }
 
         //spinner, only before first load
         PlasmaComponents.BusyIndicator {
@@ -87,7 +635,7 @@ PlasmaExtras.Representation {
             id: flick
             anchors.fill: parent
             visible: fullRoot.gamesCount > 0
-            contentWidth:  width
+            contentWidth:  Math.max(0, width - fullRoot.scrollRightPadding)
             contentHeight: contentCol.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -96,7 +644,7 @@ PlasmaExtras.Representation {
 
             Column {
                 id: contentCol
-                width: flick.width
+                width: flick.contentWidth
                 spacing: 0
 
                 Repeater {
@@ -119,7 +667,7 @@ PlasmaExtras.Representation {
                                     verticalCenter: parent.verticalCenter
                                     leftMargin: Kirigami.Units.largeSpacing
                                 }
-                                text: "── " + fullRoot.dayGroupLabel(modelData.date, modelData.label) + " ──"
+                                text: modelData.label
                                 font.bold: true
                                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
                                 color: Kirigami.Theme.textColor
@@ -134,7 +682,23 @@ PlasmaExtras.Representation {
                                 width: parent.width
                                 spacing: 0
 
-                                property bool expanded: false
+                                property var game: modelData
+                                property bool expanded: fullRoot.isGameExpanded(modelData.gameId)
+                                property int periodCount: Math.max(
+                                    modelData.period || 0,
+                                    fullRoot.homeLineScoreCount(modelData),
+                                    fullRoot.visitorLineScoreCount(modelData),
+                                    fullRoot.lineScoreCount(modelData.homeLinescoreText, modelData.homeLinescores),
+                                    fullRoot.lineScoreCount(modelData.visitorLinescoreText, modelData.visitorLinescores),
+                                    4
+                                )
+
+                                Connections {
+                                    target: fullRoot
+                                    function onExpandedGamesChanged() {
+                                        gameContainer.expanded = fullRoot.isGameExpanded(modelData.gameId);
+                                    }
+                                }
 
                                 Item {
                                     id: gameRow
@@ -153,7 +717,7 @@ PlasmaExtras.Representation {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: gameContainer.expanded = !gameContainer.expanded
+                                        onClicked: fullRoot.setGameExpanded(modelData.gameId, !gameContainer.expanded)
                                     }
 
                                     RowLayout {
@@ -165,7 +729,7 @@ PlasmaExtras.Representation {
                                             leftMargin:  Kirigami.Units.largeSpacing
                                             rightMargin: Kirigami.Units.largeSpacing
                                         }
-                                        spacing: Kirigami.Units.smallSpacing
+                                        spacing: 2
 
                                         //time / status
                                         Item {
@@ -200,11 +764,7 @@ PlasmaExtras.Representation {
                                                 }
                                                 text: {
                                                     if (modelData.statusType === "upcoming") {
-                                                        return modelData.datetime
-                                                            ? Qt.formatTime(
-                                                                new Date(modelData.datetime),
-                                                                Qt.locale().timeFormat(Locale.ShortFormat))
-                                                            : "TBD";
+                                                        return fullRoot.localGameTime(modelData.datetime);
                                                     }
                                                     return modelData.statusLabel;
                                                 }
@@ -220,47 +780,72 @@ PlasmaExtras.Representation {
                                             }
                                         }
 
+                                        //favorite marker
+                                        Item {
+                                            Layout.preferredWidth: Kirigami.Units.gridUnit
+                                            Layout.preferredHeight: matchupText.implicitHeight
+
+                                            PlasmaComponents.Label {
+                                                anchors.centerIn: parent
+                                                visible: modelData.favoriteGame === true
+                                                text: "★"
+                                                color: Kirigami.Theme.neutralTextColor
+                                                font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+                                            }
+                                        }
+
                                         //matchup
-                                        PlasmaComponents.Label {
+                                        Item {
                                             Layout.fillWidth: true
-                                            text: modelData.visitorAbbr + "  @  " + modelData.homeAbbr
-                                                  + (modelData.postseason ? "  ·  PO" : "")
-                                            font.bold: modelData.statusType === "live"
-                                            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                                            horizontalAlignment: Text.AlignHCenter
+                                            Layout.preferredHeight: matchupText.implicitHeight
+
+                                            PlasmaComponents.Label {
+                                                id: matchupText
+                                                anchors.centerIn: parent
+                                                width: parent.width
+                                                text: fullRoot.matchupMarkup(modelData)
+                                                elide: Text.ElideRight
+                                                font.bold: false
+                                                font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+                                                color: Kirigami.Theme.textColor
+                                                horizontalAlignment: Text.AlignHCenter
+                                                textFormat: Text.StyledText
+                                            }
                                         }
 
                                         //score badge
                                         Item {
                                             Layout.preferredWidth: Kirigami.Units.gridUnit * 4.5
-                                            implicitHeight: scoreBadge.implicitHeight
+                                            implicitHeight: scoreRow.implicitHeight
 
-                                            Rectangle {
-                                                id: scoreBadge
+                                            Row {
+                                                id: scoreRow
                                                 visible: modelData.statusType !== "upcoming"
                                                 anchors.centerIn: parent
-                                                width:  scoreText.implicitWidth  + Kirigami.Units.smallSpacing * 2
-                                                height: scoreText.implicitHeight + 4
-                                                radius: 4
-                                                color: modelData.statusType === "live"
-                                                       ? Qt.rgba(Kirigami.Theme.positiveTextColor.r,
-                                                                 Kirigami.Theme.positiveTextColor.g,
-                                                                 Kirigami.Theme.positiveTextColor.b, 0.15)
-                                                       : Qt.rgba(Kirigami.Theme.disabledTextColor.r,
-                                                                 Kirigami.Theme.disabledTextColor.g,
-                                                                 Kirigami.Theme.disabledTextColor.b, 0.10)
+                                                spacing: 2
 
                                                 PlasmaComponents.Label {
-                                                    id: scoreText
-                                                    anchors.centerIn: parent
-                                                    text: {
-                                                        var v = modelData.visitorScore;
-                                                        var h = modelData.homeScore;
-                                                        return v + " – " + h;
-                                                    }
-                                                    font.bold: modelData.statusType === "live"
+                                                    text: modelData.visitorScore
+                                                    font.bold: modelData.statusType === "live" ||
+                                                               (modelData.statusType === "final" && modelData.visitorWinner)
                                                     font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                                                    color: modelData.statusType === "live"
+                                                    color: modelData.statusType === "live" ||
+                                                           (modelData.statusType === "final" && modelData.visitorWinner)
+                                                           ? Kirigami.Theme.positiveTextColor
+                                                           : Kirigami.Theme.textColor
+                                                }
+                                                PlasmaComponents.Label {
+                                                    text: "–"
+                                                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+                                                    color: Kirigami.Theme.textColor
+                                                }
+                                                PlasmaComponents.Label {
+                                                    text: modelData.homeScore
+                                                    font.bold: modelData.statusType === "live" ||
+                                                               (modelData.statusType === "final" && modelData.homeWinner)
+                                                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+                                                    color: modelData.statusType === "live" ||
+                                                           (modelData.statusType === "final" && modelData.homeWinner)
                                                            ? Kirigami.Theme.positiveTextColor
                                                            : Kirigami.Theme.textColor
                                                 }
@@ -304,45 +889,90 @@ PlasmaExtras.Representation {
                                             topMargin:        Kirigami.Units.smallSpacing
                                             horizontalCenter: parent.horizontalCenter
                                         }
-                                        spacing: Kirigami.Units.smallSpacing
+                                        spacing: 2
 
-                                        //full names
+                                        //game context
                                         RowLayout {
                                             width: parent.width
+                                            spacing: Kirigami.Units.smallSpacing
+
                                             PlasmaComponents.Label {
                                                 Layout.fillWidth: true
-                                                text: modelData.visitorFullName
+                                                text: fullRoot.gameStage(modelData)
+                                                elide: Text.ElideRight
                                                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                                                opacity: 0.75
+                                                opacity: 0.78
                                             }
+
                                             PlasmaComponents.Label {
-                                                text: "@"
-                                                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                                                opacity: 0.45
-                                            }
-                                            PlasmaComponents.Label {
+                                                visible: fullRoot.expandedSeriesLabel(modelData) !== ""
                                                 Layout.fillWidth: true
-                                                text: modelData.homeFullName
+                                                text: fullRoot.expandedSeriesLabel(modelData)
+                                                elide: Text.ElideRight
                                                 font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                                                opacity: 0.75
+                                                opacity: 0.78
                                                 horizontalAlignment: Text.AlignRight
+                                            }
+                                        }
+
+                                        RowLayout {
+                                            width: parent.width
+                                            spacing: Kirigami.Units.smallSpacing
+
+                                            PlasmaComponents.Label {
+                                                Layout.fillWidth: true
+                                                visible: fullRoot.gameDetailLabel(modelData) !== ""
+                                                text: fullRoot.gameDetailLabel(modelData)
+                                                elide: Text.ElideRight
+                                                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                                                opacity: 0.58
+                                            }
+
+                                            PlasmaComponents.ToolButton {
+                                                visible: modelData.espnUrl !== ""
+                                                icon.name: "internet-services"
+                                                onClicked: Qt.openUrlExternally(modelData.espnUrl)
+                                                PlasmaComponents.ToolTip.text: "Open ESPN game page"
+                                                PlasmaComponents.ToolTip.visible: hovered
+                                                PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
+                                            }
+
+                                            PlasmaComponents.ToolButton {
+                                                visible: modelData.nbaUrl !== ""
+                                                icon.name: "media-playback-start"
+                                                onClicked: Qt.openUrlExternally(modelData.nbaUrl)
+                                                PlasmaComponents.ToolTip.text: "Open NBA game page"
+                                                PlasmaComponents.ToolTip.visible: hovered
+                                                PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
                                             }
                                         }
 
                                         //quarter scores
                                         Column {
+                                            id: scoreTable
                                             width: parent.width
                                             visible: modelData.statusType !== "upcoming"
                                             spacing: 2
+                                            property real teamColumnWidth: Kirigami.Units.gridUnit * 3
+                                            property real totalColumnWidth: Kirigami.Units.gridUnit * 3
+                                            property real periodColumnWidth: Math.max(
+                                                Kirigami.Units.gridUnit * 1.35,
+                                                (width - teamColumnWidth - totalColumnWidth -
+                                                 Kirigami.Units.smallSpacing * (gameContainer.periodCount + 1)) /
+                                                gameContainer.periodCount
+                                            )
 
                                             //period headers
                                             RowLayout {
                                                 width: parent.width
-                                                Item { Layout.preferredWidth: Kirigami.Units.gridUnit * 3 }
+                                                spacing: Kirigami.Units.smallSpacing
+                                                Item { Layout.preferredWidth: scoreTable.teamColumnWidth }
                                                 Repeater {
-                                                    model: Math.max(modelData.period, 4)
+                                                    model: gameContainer.periodCount
                                                     PlasmaComponents.Label {
-                                                        Layout.fillWidth: true
+                                                        Layout.minimumWidth: scoreTable.periodColumnWidth
+                                                        Layout.preferredWidth: scoreTable.periodColumnWidth
+                                                        Layout.maximumWidth: scoreTable.periodColumnWidth
                                                         text: index < 4
                                                               ? "Q" + (index + 1)
                                                               : (index === 4 ? "OT" : "OT" + (index - 3))
@@ -352,68 +982,80 @@ PlasmaExtras.Representation {
                                                     }
                                                 }
                                                 PlasmaComponents.Label {
-                                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                                                    Layout.preferredWidth: scoreTable.totalColumnWidth
                                                     text: "Total"
                                                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                                                     font.bold: true
                                                     opacity: 0.7
-                                                    horizontalAlignment: Text.AlignRight
+                                                    horizontalAlignment: Text.AlignHCenter
                                                 }
                                             }
 
                                             //visitor
                                             RowLayout {
                                                 width: parent.width
+                                                spacing: Kirigami.Units.smallSpacing
                                                 PlasmaComponents.Label {
-                                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                                                    Layout.preferredWidth: scoreTable.teamColumnWidth
                                                     text: modelData.visitorAbbr
-                                                    font.bold: true
+                                                    font.bold: modelData.statusType === "final" && modelData.visitorWinner
                                                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                                                 }
                                                 Repeater {
-                                                    model: Math.max(modelData.period, 4)
+                                                    model: gameContainer.periodCount
                                                     PlasmaComponents.Label {
-                                                        Layout.fillWidth: true
-                                                        text: "–"
-                                                        opacity: 0.35
+                                                        Layout.minimumWidth: scoreTable.periodColumnWidth
+                                                        Layout.preferredWidth: scoreTable.periodColumnWidth
+                                                        Layout.maximumWidth: scoreTable.periodColumnWidth
+                                                        text: fullRoot.visitorLineScore(gameContainer.game, index)
+                                                        opacity: text === "–" ? 0.35 : 0.9
                                                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                                                         horizontalAlignment: Text.AlignHCenter
                                                     }
                                                 }
                                                 PlasmaComponents.Label {
-                                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                                                    Layout.preferredWidth: scoreTable.totalColumnWidth
                                                     text: modelData.visitorScore >= 0 ? modelData.visitorScore : "–"
-                                                    font.bold: true
+                                                    font.bold: modelData.statusType === "final" && modelData.visitorWinner
                                                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                                                    horizontalAlignment: Text.AlignRight
+                                                    color: modelData.statusType === "final" && modelData.visitorWinner
+                                                           ? Kirigami.Theme.positiveTextColor
+                                                           : Kirigami.Theme.textColor
+                                                    horizontalAlignment: Text.AlignHCenter
                                                 }
                                             }
 
                                             //home
                                             RowLayout {
                                                 width: parent.width
+                                                spacing: Kirigami.Units.smallSpacing
                                                 PlasmaComponents.Label {
-                                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                                                    Layout.preferredWidth: scoreTable.teamColumnWidth
                                                     text: modelData.homeAbbr
-                                                    font.bold: true
+                                                    font.bold: modelData.statusType === "final" && modelData.homeWinner
                                                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                                                 }
                                                 Repeater {
-                                                    model: Math.max(modelData.period, 4)
+                                                    model: gameContainer.periodCount
                                                     PlasmaComponents.Label {
-                                                        Layout.fillWidth: true
-                                                        text: "–"
-                                                        opacity: 0.35
+                                                        Layout.minimumWidth: scoreTable.periodColumnWidth
+                                                        Layout.preferredWidth: scoreTable.periodColumnWidth
+                                                        Layout.maximumWidth: scoreTable.periodColumnWidth
+                                                        text: fullRoot.homeLineScore(gameContainer.game, index)
+                                                        opacity: text === "–" ? 0.35 : 0.9
                                                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                                                         horizontalAlignment: Text.AlignHCenter
                                                     }
                                                 }
                                                 PlasmaComponents.Label {
-                                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 3
+                                                    Layout.preferredWidth: scoreTable.totalColumnWidth
                                                     text: modelData.homeScore >= 0 ? modelData.homeScore : "–"
-                                                    font.bold: true
+                                                    font.bold: modelData.statusType === "final" && modelData.homeWinner
                                                     font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                                                    horizontalAlignment: Text.AlignRight
+                                                    color: modelData.statusType === "final" && modelData.homeWinner
+                                                           ? Kirigami.Theme.positiveTextColor
+                                                           : Kirigami.Theme.textColor
+                                                    horizontalAlignment: Text.AlignHCenter
                                                 }
                                             }
                                         }

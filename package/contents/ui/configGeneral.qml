@@ -7,37 +7,75 @@ import org.kde.plasma.components as PlasmaComponents
 Item {
     id: configPage
 
-    //cfg_ props auto-bind to plasmoid config
-    property string cfg_apiKey:          ""
     property int    cfg_teamId:          -1
     property string cfg_teamName:        "All Teams"
+    property string cfg_selectedTeamIds: ""
+    property string cfg_favoriteTeamIds: ""
     property int    cfg_daysAhead:       7
     property int    cfg_daysBehind:      1
+    property string cfg_dateFilterMode:  "range"
     property int    cfg_refreshInterval: 30
 
-    property bool   teamsLoaded:      false
-    property bool   teamsLoading:     false
-    property bool   syncingTeamCombo: false
-    property string teamsError:       ""
+    property bool   teamsLoaded:  false
+    property bool   teamsLoading: false
+    property string teamsError:   ""
 
-    ListModel {
-        id: teamsModel
-        ListElement { teamId: -1; label: "All Teams" }
+    ListModel { id: teamsModel }
+
+    Component.onCompleted: loadTeams()
+
+    function splitIds(value) {
+        if (!value) return [];
+        return String(value).split(",").filter(function(id) { return id !== ""; });
     }
 
-    onCfg_apiKeyChanged: {
-        if (cfg_apiKey !== "") loadTeams(cfg_apiKey);
+    function containsId(value, teamId) {
+        var ids = splitIds(value);
+        for (var i = 0; i < ids.length; i++) {
+            if (parseInt(ids[i]) === parseInt(teamId)) return true;
+        }
+        return false;
     }
 
-    onCfg_teamIdChanged: {
-        if (teamsLoaded) Qt.callLater(syncTeamCombo);
+    function setId(value, teamId, selected) {
+        var ids = splitIds(value);
+        var next = [];
+        var found = false;
+        for (var i = 0; i < ids.length; i++) {
+            if (parseInt(ids[i]) === parseInt(teamId)) {
+                found = true;
+                if (selected) next.push(String(ids[i]));
+            } else {
+                next.push(String(ids[i]));
+            }
+        }
+        if (selected && !found) next.push(String(teamId));
+        return next.join(",");
     }
 
-    Component.onCompleted: {
-        if (cfg_apiKey !== "") loadTeams(cfg_apiKey);
+    function labelForSelectedTeams() {
+        var ids = splitIds(cfg_selectedTeamIds);
+        if (ids.length === 0) return "All Teams";
+        if (ids.length === 1) {
+            for (var i = 0; i < teamsModel.count; i++) {
+                if (parseInt(teamsModel.get(i).teamId) === parseInt(ids[0]))
+                    return teamsModel.get(i).abbr;
+            }
+            return "1 Team";
+        }
+        return ids.length + " Teams";
     }
 
-    function loadTeams(apiKey) {
+    function teamConference(abbr) {
+        var east = ["ATL", "BOS", "BKN", "CHA", "CHI", "CLE", "DET", "IND", "MIA", "MIL", "NY", "NYK", "ORL", "PHI", "TOR", "WSH", "WAS"];
+        var value = String(abbr || "");
+        for (var i = 0; i < east.length; i++) {
+            if (east[i] === value) return "East";
+        }
+        return "West";
+    }
+
+    function loadTeams() {
         teamsLoading = true;
         teamsError = "";
         var xhr = new XMLHttpRequest();
@@ -46,46 +84,32 @@ Item {
             teamsLoading = false;
             if (xhr.status === 200) {
                 try {
-                    var data = JSON.parse(xhr.responseText);
-                    var teams = data.data || [];
+                    var data     = JSON.parse(xhr.responseText);
+                    var sports   = data.sports  || [];
+                    var leagues  = (sports[0]   || {}).leagues || [];
+                    var teamsArr = (leagues[0]  || {}).teams   || [];
+                    var teams    = teamsArr.map(function(t) { return t.team; });
                     teams.sort(function(a, b) {
-                        return a.full_name.localeCompare(b.full_name);
+                        return a.abbreviation.localeCompare(b.abbreviation);
                     });
                     teamsModel.clear();
-                    teamsModel.append({ teamId: -1, label: "All Teams" });
                     for (var i = 0; i < teams.length; i++) {
                         teamsModel.append({
-                            teamId: teams[i].id,
-                            label: teams[i].full_name + " (" + teams[i].abbreviation + ")"
+                            teamId: parseInt(teams[i].id),
+                            abbr: teams[i].abbreviation,
+                            label: teams[i].displayName + " (" + teams[i].abbreviation + ")"
                         });
                     }
                     teamsLoaded = true;
-                    Qt.callLater(syncTeamCombo);
                 } catch(e) {
                     teamsError = "Failed to parse teams response";
                 }
-            } else if (xhr.status === 401) {
-                teamsError = "Invalid API key";
             } else {
                 teamsError = "Could not load teams (HTTP " + xhr.status + ")";
             }
         };
-        xhr.open("GET", "https://api.balldontlie.io/v1/teams?per_page=100");
-        xhr.setRequestHeader("Authorization", apiKey);
+        xhr.open("GET", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams?limit=100");
         xhr.send();
-    }
-
-    function syncTeamCombo() {
-        syncingTeamCombo = true;
-        for (var i = 0; i < teamsModel.count; i++) {
-            if (teamsModel.get(i).teamId === cfg_teamId) {
-                teamCombo.currentIndex = i;
-                syncingTeamCombo = false;
-                return;
-            }
-        }
-        teamCombo.currentIndex = 0;
-        syncingTeamCombo = false;
     }
 
     Kirigami.FormLayout {
@@ -93,94 +117,200 @@ Item {
         anchors { top: parent.top; left: parent.left; right: parent.right }
         anchors.margins: Kirigami.Units.smallSpacing
 
-        RowLayout {
-            Kirigami.FormData.label: "API Key:"
+        PlasmaComponents.Label {
+            Kirigami.FormData.label: "Visible teams:"
+            text: labelForSelectedTeams()
+            opacity: 0.75
+        }
+
+        ColumnLayout {
+            Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
 
-            QQC2.TextField {
-                id: apiKeyField
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 20
-                text: cfg_apiKey
-                echoMode: showKeyButton.checked ? TextInput.Normal : TextInput.Password
-                placeholderText: "Enter your balldontlie.io API key"
-                onEditingFinished: cfg_apiKey = text
-                onTextChanged: {
-                    if (text !== cfg_apiKey) cfg_apiKey = text;
+            QQC2.CheckBox {
+                text: "All Teams"
+                checked: cfg_selectedTeamIds === ""
+                onToggled: {
+                    if (checked) {
+                        cfg_selectedTeamIds = "";
+                        cfg_teamId = -1;
+                        cfg_teamName = "All Teams";
+                    }
                 }
             }
 
-            QQC2.Button {
-                id: showKeyButton
-                checkable: true
-                icon.name: checked ? "password-show-off" : "password-show-on"
-                QQC2.ToolTip.text: checked ? "Hide key" : "Show key"
-                QQC2.ToolTip.visible: hovered
+            PlasmaComponents.Label {
+                text: "East"
+                font.bold: true
+                opacity: 0.7
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Repeater {
+                    model: teamsModel
+
+                    QQC2.CheckBox {
+                        visible: configPage.teamConference(abbr) === "East"
+                        width: visible ? implicitWidth : 0
+                        height: visible ? implicitHeight : 0
+                        text: abbr
+                        checked: configPage.containsId(cfg_selectedTeamIds, teamId)
+                        onToggled: {
+                            cfg_selectedTeamIds = configPage.setId(cfg_selectedTeamIds, teamId, checked);
+                            cfg_teamId = -1;
+                            cfg_teamName = configPage.labelForSelectedTeams();
+                        }
+                    }
+                }
+            }
+
+            PlasmaComponents.Label {
+                text: "West"
+                font.bold: true
+                opacity: 0.7
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Repeater {
+                    model: teamsModel
+
+                    QQC2.CheckBox {
+                        visible: configPage.teamConference(abbr) === "West"
+                        width: visible ? implicitWidth : 0
+                        height: visible ? implicitHeight : 0
+                        text: abbr
+                        checked: configPage.containsId(cfg_selectedTeamIds, teamId)
+                        onToggled: {
+                            cfg_selectedTeamIds = configPage.setId(cfg_selectedTeamIds, teamId, checked);
+                            cfg_teamId = -1;
+                            cfg_teamName = configPage.labelForSelectedTeams();
+                        }
+                    }
+                }
             }
         }
 
         Kirigami.Separator { Kirigami.FormData.isSection: true }
 
         ColumnLayout {
-            Kirigami.FormData.label: "Favorite Team:"
+            Kirigami.FormData.label: "Favorite teams:"
+            Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
 
-            QQC2.ComboBox {
-                id: teamCombo
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 20
-                model: teamsModel
-                textRole: "label"
-                enabled: teamsLoaded && !teamsLoading
+            PlasmaComponents.Label {
+                text: "East"
+                font.bold: true
+                opacity: 0.7
+            }
 
-                onCurrentIndexChanged: {
-                    if (syncingTeamCombo) return;
-                    if (currentIndex >= 0 && currentIndex < teamsModel.count) {
-                        var item = teamsModel.get(currentIndex);
-                        cfg_teamId   = item.teamId;
-                        cfg_teamName = item.label === "All Teams" ? "All Teams"
-                                       : item.label.split("(")[0].trim();
+            Flow {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                Repeater {
+                    model: teamsModel
+
+                    QQC2.CheckBox {
+                        visible: configPage.teamConference(abbr) === "East"
+                        width: visible ? implicitWidth : 0
+                        height: visible ? implicitHeight : 0
+                        text: abbr
+                        checked: configPage.containsId(cfg_favoriteTeamIds, teamId)
+                        onToggled: cfg_favoriteTeamIds = configPage.setId(cfg_favoriteTeamIds, teamId, checked)
                     }
                 }
             }
 
-            PlasmaComponents.BusyIndicator {
-                visible: teamsLoading
-                running: visible
-                Layout.preferredWidth:  Kirigami.Units.iconSizes.medium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+            PlasmaComponents.Label {
+                text: "West"
+                font.bold: true
+                opacity: 0.7
             }
 
-            PlasmaComponents.Label {
-                visible: teamsError !== ""
-                text: teamsError
-                color: Kirigami.Theme.negativeTextColor
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                wrapMode: Text.Wrap
-            }
+            Flow {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
 
-            PlasmaComponents.Label {
-                visible: !teamsLoaded && !teamsLoading && cfg_apiKey === ""
-                text: "Enter your API key above to load teams."
-                opacity: 0.6
-                font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+                Repeater {
+                    model: teamsModel
+
+                    QQC2.CheckBox {
+                        visible: configPage.teamConference(abbr) === "West"
+                        width: visible ? implicitWidth : 0
+                        height: visible ? implicitHeight : 0
+                        text: abbr
+                        checked: configPage.containsId(cfg_favoriteTeamIds, teamId)
+                        onToggled: cfg_favoriteTeamIds = configPage.setId(cfg_favoriteTeamIds, teamId, checked)
+                    }
+                }
             }
+        }
+
+        PlasmaComponents.Label {
+            visible: teamsLoading
+            text: "Loading teams..."
+            opacity: 0.7
+        }
+
+        PlasmaComponents.Label {
+            visible: teamsError !== ""
+            text: teamsError
+            color: Kirigami.Theme.negativeTextColor
+            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+            wrapMode: Text.Wrap
         }
 
         Kirigami.Separator { Kirigami.FormData.isSection: true }
 
-        QQC2.SpinBox {
-            id: daysAheadSpin
-            Kirigami.FormData.label: "Days ahead:"
-            from: 1; to: 30
-            value: cfg_daysAhead
-            onValueChanged: cfg_daysAhead = value
+        QQC2.ComboBox {
+            id: completedCombo
+            Kirigami.FormData.label: "Completed matches:"
+            textRole: "label"
+            model: [
+                { label: "Last 1 day" },
+                { label: "Last 3 days" },
+                { label: "Last 7 days" }
+            ]
+            currentIndex: cfg_daysBehind === 1 ? 0
+                          : cfg_daysBehind === 3 ? 1
+                          : cfg_daysBehind === 7 ? 2
+                          : 0
+            onActivated: function(index) {
+                cfg_daysBehind = [1, 3, 7][index];
+                cfg_dateFilterMode = "range";
+            }
         }
 
-        QQC2.SpinBox {
-            id: daysBehindSpin
-            Kirigami.FormData.label: "Days behind:"
-            from: 0; to: 7
-            value: cfg_daysBehind
-            onValueChanged: cfg_daysBehind = value
+        QQC2.ComboBox {
+            id: upcomingCombo
+            Kirigami.FormData.label: "Upcoming matches:"
+            textRole: "label"
+            model: [
+                { label: "Next 1 day" },
+                { label: "Next 3 days" },
+                { label: "Next 7 days" }
+            ]
+            currentIndex: cfg_daysAhead === 1 ? 0
+                          : cfg_daysAhead === 3 ? 1
+                          : cfg_daysAhead === 7 ? 2
+                          : 0
+            onActivated: function(index) {
+                cfg_daysAhead = [1, 3, 7][index];
+                cfg_dateFilterMode = "range";
+            }
+        }
+
+        PlasmaComponents.Label {
+            Kirigami.FormData.label: "Date range:"
+            text: "Maximum 14 days (7 past + 7 future)"
+            font.pixelSize: Kirigami.Theme.smallFont.pixelSize
+            opacity: 0.7
         }
 
         Kirigami.Separator { Kirigami.FormData.isSection: true }
@@ -190,7 +320,6 @@ Item {
             spacing: Kirigami.Units.smallSpacing
 
             QQC2.SpinBox {
-                id: refreshSpin
                 from: 5; to: 120
                 value: cfg_refreshInterval
                 onValueChanged: cfg_refreshInterval = value
@@ -199,11 +328,9 @@ Item {
             PlasmaComponents.Label { text: "minutes" }
         }
 
-        Kirigami.Separator { Kirigami.FormData.isSection: true }
-
         PlasmaComponents.Label {
-            Kirigami.FormData.label: "API key:"
-            text: "Get a free key at balldontlie.io"
+            Kirigami.FormData.label: "Data source:"
+            text: "ESPN (no API key required)"
             font.pixelSize: Kirigami.Theme.smallFont.pixelSize
             opacity: 0.7
         }
