@@ -4,20 +4,26 @@
       xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
     <kcfgfile name=""/>
     <group name="General">
-        <entry name="apiKey" type="String">
-            <default></default>
-        </entry>
         <entry name="teamId" type="Int">
             <default>-1</default>
         </entry>
         <entry name="teamName" type="String">
             <default>All Teams</default>
         </entry>
+        <entry name="selectedTeamIds" type="String">
+            <default></default>
+        </entry>
+        <entry name="favoriteTeamIds" type="String">
+            <default></default>
+        </entry>
         <entry name="daysAhead" type="Int">
             <default>7</default>
         </entry>
         <entry name="daysBehind" type="Int">
-            <default>1</default>
+            <default>7</default>
+        </entry>
+        <entry name="dateFilterMode" type="String">
+            <default>range</default>
         </entry>
         <entry name="refreshInterval" type="Int">
             <default>30</default>
