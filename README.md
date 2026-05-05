@@ -1,28 +1,24 @@
 # NBA Schedule Widget for KDE Plasma 6
 
-**Requirements:** balldontlie.io API key  
-*TODO: transfer to espn api*
+![Widget Preview](images/preview/preview.png)
+## Install Or Update
 
-## Setup
-Add your API key to `.env`:
-```bash
-echo "NBA_API_KEY=your_key_here" > .env
-```
+From the repo root, run:
 
-## Install/Update
 ```bash
 ./devInstall.sh
 ```
 
-## Standalone Window 
+##Testing Commands
+Test in window mode:
+
 ```bash
 plasmawindowed org.kde.plasma.nba-schedule
 ```
 
-## Reload Plasma (Update)
+Update installed widget + refresh plasma: 
+
 ```bash
+kpackagetool6 --type Plasma/Applet --upgrade package
 systemctl --user restart plasma-plasmashell.service
 ```
-
-## TODO: Config
-Right-click widget > **Configure**
