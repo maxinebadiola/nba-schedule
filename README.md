@@ -1,6 +1,6 @@
 # NBA Schedule Widget for KDE Plasma 6
 
-![Widget Preview](package/contents/images/icons/preview/preview.png)
+![Widget Preview](package/contents/images/preview/preview.png)
 ## Install Or Update
 
 From the repo root, run:
