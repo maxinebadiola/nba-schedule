@@ -1,0 +1,17 @@
+.env
+# KDE build
+*.user
+*.user.*
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+#editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

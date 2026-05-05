@@ -1,0 +1,14 @@
+{
+  "KPlugin": {
+    "Authors": [{ "Email": "max@badiola.net", "Name": "NBA Schedule Widget" }],
+    "Category": "Online Services",
+    "Description": "NBA game schedule with live and final scores",
+    "Icon": "games-highscores",
+    "Id": "org.kde.plasma.nba-schedule",
+    "Name": "NBA Schedule",
+    "Version": "1.0",
+    "License": "GPL-2.0-or-later"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0",
+  "KPackageStructure": "Plasma/Applet"
+}
