@@ -15,6 +15,7 @@ PlasmoidItem {
     property var    gamesGroups:  []
     property var    teamsList:    []
     property int    fetchGeneration: 0
+    property bool   hasLiveGames: false
     readonly property bool useCompactRepresentation:
         Plasmoid.formFactor === Plasmoid.Horizontal || Plasmoid.formFactor === Plasmoid.Vertical
 
@@ -42,10 +43,16 @@ PlasmoidItem {
 
     Timer {
         id: refreshTimer
-        interval: root.refreshIntervalMs()
+        interval: 60 * 60 * 1000
         running:  true
         repeat:   true
         onTriggered: root.doFetchGames()
+    }
+
+    onHasLiveGamesChanged: {
+        var newInterval = root.hasLiveGames ? 30 * 1000 : 60 * 60 * 1000;
+        refreshTimer.interval = newInterval;
+        refreshTimer.restart();
     }
 
     Component.onCompleted: {
@@ -61,10 +68,6 @@ PlasmoidItem {
         function onDaysAheadChanged()   { root.doFetchGames(); }
         function onDaysBehindChanged()  { root.doFetchGames(); }
         function onDateFilterModeChanged() { root.doFetchGames(); }
-        function onRefreshIntervalChanged() {
-            refreshTimer.interval = root.refreshIntervalMs();
-            refreshTimer.restart();
-        }
     }
 
     function doFetchGames() {
@@ -162,12 +165,18 @@ PlasmoidItem {
                 root.gamesCount  = processed.length;
                 root.errorMessage = "";
                 root.lastUpdated  = new Date();
+                var live = false;
+                for (var li = 0; li < processed.length; li++) {
+                    if (processed[li].statusType === 'live') { live = true; break; }
+                }
+                root.hasLiveGames = live;
             } catch(e) {
                 if (root.gamesCount === 0) {
                     root.gamesData   = [];
                     root.gamesGroups = [];
                     root.gamesCount  = 0;
                 }
+                root.hasLiveGames = false;
                 root.errorMessage = "Failed to parse response: " + e.message;
             }
         }

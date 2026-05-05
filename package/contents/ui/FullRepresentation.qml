@@ -134,6 +134,32 @@ PlasmaExtras.Representation {
         return fullRoot.teamMarkup(label, winner, statusType);
     }
 
+    function teamIconPath(abbr) {
+        var paths = {
+            "BOS": "east/atlantic/bos.svg", "BKN": "east/atlantic/bkn.svg",
+            "NY":  "east/atlantic/ny.svg",  "NYK": "east/atlantic/ny.svg",
+            "PHI": "east/atlantic/phi.svg", "TOR": "east/atlantic/tor.svg",
+            "CHI": "east/central/chi.svg",  "CLE": "east/central/cle.svg",
+            "DET": "east/central/det.svg",  "IND": "east/central/ind.svg",
+            "MIL": "east/central/mil.svg",
+            "ATL": "east/southeast/atl.svg","CHA": "east/southeast/cha.svg",
+            "MIA": "east/southeast/mia.svg","ORL": "east/southeast/orl.svg",
+            "WAS": "east/southeast/was.svg","WSH": "east/southeast/was.svg",
+            "DEN": "west/northwest/den.svg","MIN": "west/northwest/min.svg",
+            "OKC": "west/northwest/okc.svg","POR": "west/northwest/por.svg",
+            "UTA": "west/northwest/uta.svg",
+            "GS":  "west/pacific/gs.svg",   "GSW": "west/pacific/gs.svg",
+            "LAC": "west/pacific/lac.svg",  "LAL": "west/pacific/lal.svg",
+            "PHX": "west/pacific/phx.svg",  "SAC": "west/pacific/sac.svg",
+            "DAL": "west/southwest/dal.svg","HOU": "west/southwest/hou.svg",
+            "MEM": "west/southwest/mem.svg",
+            "NO":  "west/southwest/no.svg", "NOP": "west/southwest/no.svg",
+            "SA":  "west/southwest/sa.svg", "SAS": "west/southwest/sa.svg"
+        };
+        var p = paths[String(abbr || "").toUpperCase()];
+        return p ? Qt.resolvedUrl("../images/icons/" + p) : "";
+    }
+
     function matchupMarkup(game) {
         return fullRoot.compactTeamMarkup(game.visitorAbbr, game.visitorWinner, game.statusType) +
                " <font color=\"" + fullRoot.htmlColor(Kirigami.Theme.disabledTextColor) + "\">@</font> " +
@@ -781,35 +807,85 @@ PlasmaExtras.Representation {
                                         }
 
                                         //favorite marker
-                                        Item {
-                                            Layout.preferredWidth: Kirigami.Units.gridUnit
-                                            Layout.preferredHeight: matchupText.implicitHeight
-
-                                            PlasmaComponents.Label {
-                                                anchors.centerIn: parent
-                                                visible: modelData.favoriteGame === true
-                                                text: "★"
-                                                color: Kirigami.Theme.neutralTextColor
-                                                font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                                            }
+                                        PlasmaComponents.Label {
+                                            Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
+                                            visible: modelData.favoriteGame === true
+                                            text: "★"
+                                            color: Kirigami.Theme.neutralTextColor
+                                            font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
                                         }
 
-                                        //matchup
+                                        //matchup — @ pinned to center, teams expand outward
                                         Item {
                                             Layout.fillWidth: true
-                                            Layout.preferredHeight: matchupText.implicitHeight
+                                            implicitHeight: atLabel.implicitHeight
 
                                             PlasmaComponents.Label {
-                                                id: matchupText
+                                                id: atLabel
                                                 anchors.centerIn: parent
-                                                width: parent.width
-                                                text: fullRoot.matchupMarkup(modelData)
-                                                elide: Text.ElideRight
-                                                font.bold: false
+                                                text: "@"
+                                                color: Kirigami.Theme.disabledTextColor
                                                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                                                color: Kirigami.Theme.textColor
-                                                horizontalAlignment: Text.AlignHCenter
-                                                textFormat: Text.StyledText
+                                            }
+
+                                            RowLayout {
+                                                anchors {
+                                                    right: atLabel.left
+                                                    rightMargin: Kirigami.Units.smallSpacing / 2
+                                                    verticalCenter: parent.verticalCenter
+                                                }
+                                                spacing: Kirigami.Units.smallSpacing / 2
+
+                                                Image {
+                                                    readonly property int sz: Kirigami.Theme.defaultFont.pixelSize
+                                                    source: fullRoot.teamIconPath(modelData.visitorAbbr)
+                                                    Layout.preferredWidth: sz
+                                                    Layout.preferredHeight: sz
+                                                    Layout.maximumWidth: sz
+                                                    Layout.maximumHeight: sz
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    sourceSize.width: sz * 2
+                                                    sourceSize.height: sz * 2
+                                                    fillMode: Image.PreserveAspectFit
+                                                    smooth: true
+                                                    visible: status === Image.Ready
+                                                }
+                                                PlasmaComponents.Label {
+                                                    text: fullRoot.compactTeamMarkup(modelData.visitorAbbr, modelData.visitorWinner, modelData.statusType)
+                                                    textFormat: Text.StyledText
+                                                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                }
+                                            }
+
+                                            RowLayout {
+                                                anchors {
+                                                    left: atLabel.right
+                                                    leftMargin: Kirigami.Units.smallSpacing / 2
+                                                    verticalCenter: parent.verticalCenter
+                                                }
+                                                spacing: Kirigami.Units.smallSpacing / 2
+
+                                                PlasmaComponents.Label {
+                                                    text: fullRoot.compactTeamMarkup(modelData.homeAbbr, modelData.homeWinner, modelData.statusType)
+                                                    textFormat: Text.StyledText
+                                                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                }
+                                                Image {
+                                                    readonly property int sz: Kirigami.Theme.defaultFont.pixelSize
+                                                    source: fullRoot.teamIconPath(modelData.homeAbbr)
+                                                    Layout.preferredWidth: sz
+                                                    Layout.preferredHeight: sz
+                                                    Layout.maximumWidth: sz
+                                                    Layout.maximumHeight: sz
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    sourceSize.width: sz * 2
+                                                    sourceSize.height: sz * 2
+                                                    fillMode: Image.PreserveAspectFit
+                                                    smooth: true
+                                                    visible: status === Image.Ready
+                                                }
                                             }
                                         }
 
@@ -930,7 +1006,7 @@ PlasmaExtras.Representation {
 
                                             PlasmaComponents.ToolButton {
                                                 visible: modelData.espnUrl !== ""
-                                                icon.name: "internet-services"
+                                                icon.source: Qt.resolvedUrl("../images/icons/espn.svg")
                                                 onClicked: Qt.openUrlExternally(modelData.espnUrl)
                                                 PlasmaComponents.ToolTip.text: "Open ESPN game page"
                                                 PlasmaComponents.ToolTip.visible: hovered
@@ -939,7 +1015,7 @@ PlasmaExtras.Representation {
 
                                             PlasmaComponents.ToolButton {
                                                 visible: modelData.nbaUrl !== ""
-                                                icon.name: "media-playback-start"
+                                                icon.source: Qt.resolvedUrl("../images/icons/nba.svg")
                                                 onClicked: Qt.openUrlExternally(modelData.nbaUrl)
                                                 PlasmaComponents.ToolTip.text: "Open NBA game page"
                                                 PlasmaComponents.ToolTip.visible: hovered
